@@ -1,0 +1,338 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  PARENT
+  CHILD
+  TEACHER
+  ADMIN
+}
+
+enum FamilyRole {
+  OWNER
+  GUARDIAN
+  CHILD
+}
+
+enum CurrencyType {
+  STARS
+  HEARTS
+  ENERGY
+  XP
+}
+
+enum LedgerSource {
+  DAILY_LOGIN
+  LESSON_COMPLETED
+  STREAK_MILESTONE
+  TREASURE_CHEST
+  ACHIEVEMENT
+  AVATAR_PURCHASE
+  HEART_REFILL
+  ENERGY_REFILL
+  ADMIN_ADJUSTMENT
+}
+
+enum InventoryItemType {
+  AVATAR_COSMETIC
+  LETTER_COLLECTIBLE
+  BADGE
+  WORLD
+  TREASURE_CHEST
+}
+
+enum LessonStatus {
+  STARTED
+  COMPLETED
+}
+
+enum ConsentType {
+  CHILD_ACCOUNT
+  DATA_PROCESSING
+  REWARDED_VIDEO
+  PARENT_REFILL
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  passwordHash String?  @map("password_hash")
+  role         UserRole
+  displayName  String   @map("display_name")
+  dateOfBirth  DateTime? @map("date_of_birth") @db.Date
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  profiles        Profile[]
+  familyMemberships FamilyMember[]
+  consentsGiven   GuardianConsent[] @relation("ConsentGuardian")
+
+  @@map("users")
+}
+
+model Profile {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String?  @map("user_id") @db.Uuid
+  familyId    String?  @map("family_id") @db.Uuid
+  displayName String   @map("display_name")
+  birthYear   Int?     @map("birth_year")
+  avatarKey   String?  @map("avatar_key")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user               User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
+  family             Family?              @relation(fields: [familyId], references: [id], onDelete: SetNull)
+  wallet             Wallet?
+  streak             Streak?
+  lessonAttempts     LessonAttempt[]
+  lessonProgress     LessonProgress[]
+  letterProgress     LetterProgress[]
+  dailyRewards       DailyRewardClaim[]
+  inventoryItems     InventoryItem[]
+  achievements       ProfileAchievement[]
+  treasureChests     TreasureChest[]
+  auditEvents        AuditEvent[]
+
+  @@index([familyId])
+  @@map("profiles")
+}
+
+model Family {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  members  FamilyMember[]
+  profiles Profile[]
+
+  @@map("families")
+}
+
+model FamilyMember {
+  id        String     @id @default(uuid()) @db.Uuid
+  familyId  String     @map("family_id") @db.Uuid
+  userId    String     @map("user_id") @db.Uuid
+  role      FamilyRole
+  createdAt DateTime   @default(now()) @map("created_at")
+
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([familyId, userId])
+  @@map("family_members")
+}
+
+model GuardianConsent {
+  id           String      @id @default(uuid()) @db.Uuid
+  guardianId   String      @map("guardian_id") @db.Uuid
+  childProfileId String    @map("child_profile_id") @db.Uuid
+  type         ConsentType
+  grantedAt    DateTime    @default(now()) @map("granted_at")
+  revokedAt    DateTime?   @map("revoked_at")
+
+  guardian User @relation("ConsentGuardian", fields: [guardianId], references: [id], onDelete: Cascade)
+
+  @@index([childProfileId])
+  @@map("guardian_consents")
+}
+
+model Wallet {
+  profileId     String   @id @map("profile_id") @db.Uuid
+  starsBalance  Int      @default(0) @map("stars_balance")
+  heartsBalance Int      @default(5) @map("hearts_balance")
+  energyBalance Int      @default(10) @map("energy_balance")
+  xpTotal       Int      @default(0) @map("xp_total")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  profile Profile        @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  ledger  WalletLedger[]
+
+  @@map("wallets")
+}
+
+model WalletLedger {
+  id             String       @id @default(uuid()) @db.Uuid
+  profileId      String       @map("profile_id") @db.Uuid
+  currency       CurrencyType
+  amount         Int
+  source         LedgerSource
+  sourceId       String?      @map("source_id")
+  idempotencyKey String       @map("idempotency_key")
+  metadata       Json?
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  wallet Wallet @relation(fields: [profileId], references: [profileId], onDelete: Cascade)
+
+  @@unique([profileId, currency, idempotencyKey])
+  @@index([profileId, source])
+  @@map("wallet_ledger")
+}
+
+model LessonAttempt {
+  id                  String       @id @default(uuid()) @db.Uuid
+  profileId           String       @map("profile_id") @db.Uuid
+  lessonId            String       @map("lesson_id")
+  status              LessonStatus @default(STARTED)
+  correctAnswers      Int          @default(0) @map("correct_answers")
+  firstAttemptCorrect Int          @default(0) @map("first_attempt_correct")
+  totalQuestions      Int          @default(0) @map("total_questions")
+  mistakes            Int          @default(0)
+  hintsUsed           Int          @default(0) @map("hints_used")
+  timeSpentSeconds    Int          @default(0) @map("time_spent_seconds")
+  rating              Int?
+  completedAt         DateTime?    @map("completed_at")
+  createdAt           DateTime     @default(now()) @map("created_at")
+  updatedAt           DateTime     @updatedAt @map("updated_at")
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, lessonId])
+  @@map("lesson_attempts")
+}
+
+model LessonProgress {
+  id            String   @id @default(uuid()) @db.Uuid
+  profileId     String   @map("profile_id") @db.Uuid
+  lessonId      String   @map("lesson_id")
+  bestRating    Int      @default(0) @map("best_rating")
+  completions   Int      @default(0)
+  lastCompletedAt DateTime? @map("last_completed_at")
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, lessonId])
+  @@map("lesson_progress")
+}
+
+model LetterProgress {
+  id          String    @id @default(uuid()) @db.Uuid
+  profileId   String    @map("profile_id") @db.Uuid
+  letterKey   String    @map("letter_key")
+  masteredAt  DateTime? @map("mastered_at")
+  attempts    Int       @default(0)
+  correct     Int       @default(0)
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, letterKey])
+  @@map("letter_progress")
+}
+
+model Streak {
+  profileId       String    @id @map("profile_id") @db.Uuid
+  currentDays     Int       @default(0) @map("current_days")
+  longestDays     Int       @default(0) @map("longest_days")
+  lastActivityDate DateTime? @map("last_activity_date") @db.Date
+  freezesAvailable Int      @default(0) @map("freezes_available")
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@map("streaks")
+}
+
+model DailyRewardClaim {
+  id        String   @id @default(uuid()) @db.Uuid
+  profileId String   @map("profile_id") @db.Uuid
+  claimDate DateTime @map("claim_date") @db.Date
+  dayIndex  Int      @map("day_index")
+  reward    Json
+  createdAt DateTime @default(now()) @map("created_at")
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, claimDate])
+  @@map("daily_reward_claims")
+}
+
+model TreasureChest {
+  id               String    @id @default(uuid()) @db.Uuid
+  profileId        String    @map("profile_id") @db.Uuid
+  triggerLessonCount Int     @map("trigger_lesson_count")
+  openedAt         DateTime? @map("opened_at")
+  reward           Json?
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, triggerLessonCount])
+  @@map("treasure_chests")
+}
+
+model Achievement {
+  id          String   @id
+  name        String
+  description String
+  reward      Json
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  profiles ProfileAchievement[]
+
+  @@map("achievements")
+}
+
+model ProfileAchievement {
+  id            String   @id @default(uuid()) @db.Uuid
+  profileId     String   @map("profile_id") @db.Uuid
+  achievementId String   @map("achievement_id")
+  awardedAt     DateTime @default(now()) @map("awarded_at")
+
+  profile     Profile     @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  achievement Achievement @relation(fields: [achievementId], references: [id], onDelete: Restrict)
+
+  @@unique([profileId, achievementId])
+  @@map("profile_achievements")
+}
+
+model CatalogItem {
+  id          String            @id
+  type        InventoryItemType
+  name        String
+  costStars   Int               @default(0) @map("cost_stars")
+  metadata    Json?
+  isActive    Boolean           @default(true) @map("is_active")
+  createdAt   DateTime          @default(now()) @map("created_at")
+
+  inventoryItems InventoryItem[]
+
+  @@map("catalog_items")
+}
+
+model InventoryItem {
+  id            String            @id @default(uuid()) @db.Uuid
+  profileId     String            @map("profile_id") @db.Uuid
+  catalogItemId String?           @map("catalog_item_id")
+  type          InventoryItemType
+  key           String
+  metadata      Json?
+  acquiredAt    DateTime          @default(now()) @map("acquired_at")
+
+  profile     Profile      @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  catalogItem CatalogItem? @relation(fields: [catalogItemId], references: [id], onDelete: SetNull)
+
+  @@unique([profileId, key])
+  @@map("inventory_items")
+}
+
+model AuditEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  actorUserId String?  @map("actor_user_id") @db.Uuid
+  profileId   String?  @map("profile_id") @db.Uuid
+  action      String
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  profile Profile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+
+  @@index([actorUserId])
+  @@index([profileId])
+  @@map("audit_events")
+}
